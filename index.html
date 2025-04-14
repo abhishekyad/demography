@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>USA Map Search</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chart.js" />
+
+  <style>
+    body { margin: 0; display: flex; overflow-x: hidden; }
+    #map { height: 100vh; flex: 1; }
+
+  .search-container {
+    display: flex;
+    flex-direction: column; /* <-- Stack elements vertically */
+    align-items: flex-start; /* Align to the left */
+    gap: 10px; /* Add space between buttons */
+    max-width: 300px; /* Optional: limit the width */
+    margin: 20px;
+  }
+
+  .search-container input,
+  .search-container button {
+    width: 100%; /* Make input and buttons full width */
+    padding: 10px;
+    font-size: 16px;
+  }
+
+
+.bar-loader-container {
+  position: fixed; /* <--- Important: stick it on top */
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%; /* full page */
+  background: rgba(255, 255, 255, 0.7); /* semi-transparent background */
+  display: none; /* hidden by default */
+  justify-content: center;
+  align-items: center;
+  z-index: 9999; /* <--- Very high so it's on top of everything */
+}
+
+
+.bar-loader {
+  width: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #4facfe, #00f2fe);
+  animation: loading-bar 2s infinite;
+  border-radius: 2px;
+}
+
+@keyframes loading-bar {
+  0% {
+    width: 0;
+    opacity: 1;
+  }
+  50% {
+    width: 80%;
+    opacity: 1;
+  }
+  100% {
+    width: 0;
+    opacity: 0.5;
+  }
+}
+
+
+    #chart-container {
+      width: 100%;
+      height: 200px;
+      margin-top: 20px;
+    }
+
+    .sidebar {
+      width: 300px;
+      background: #f8f9fa;
+      padding: 20px;
+      border-left: 1px solid #ddd;
+      overflow-y: auto;
+      font-family: sans-serif;
+
+      /* Animation */
+      position: absolute;
+      right: -320px; /* hidden */
+      top: 0;
+      height: 100%;
+      transition: right 0.5s ease;
+      z-index: 1001;
+    }
+
+    .sidebar.active {
+      right: 0; /* visible */
+    }
+
+    .sidebar h2 {
+      font-size: 20px;
+      margin-top: 0;
+    }
+
+    .sidebar p {
+      margin: 5px 0;
+    }
+
+    .sidebar strong {
+      display: inline-block;
+      width: 180px;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="search-container">
+  <input type="text" id="search-input" placeholder="Search for State, County, or City..." />
+  <button onclick="search()">Search</button>
+  <button onclick="clearSearch()">Clear Search</button>
+  <button onclick="fetchTrend('population')">Show Trend of Population</button>
+  <button onclick="fetchTrend('education_total')">Show Trend of Education</button>
+  <button onclick="fetchTrend('bachelor_degree')">Show Trend of Undergraduate</button>
+  <button onclick="fetchTrend('masters_degree')">Show Trend of Graduate</button>
+  <button onclick="fetchTrend('population_below_poverty_level')">Show Trend of Pop. below Poverty Level</button>
+  <button onclick="nearby_cities()">Get Nearby Cities</button>
+  <button onclick="encompassing_county()">Get Encompassing County</button>      <div id="chart-container">
+        <canvas id="trendChart" width="400" height="300"></canvas></div>
+  <div class="bar-loader-container">
+  <div class="bar-loader"></div>
+</div>
+
+</div>
+
+<div id="map"></div>
+
+<div class="sidebar" id="info-sidebar">
+  <h2>Area Info</h2>
+  <p>Search for a location to see details here.</p>
+
+  <!-- Chart container -->
+  <div id="encompassing-county-details" style="margin-top: 20px; height:4000px;">
+    <!-- Encompassing county info will appear here -->
+  </div>
+</div>
+
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+  const map = L.map('map').setView([39.8283, -98.5795], 4); // Center USA
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  let currentLayer = null;
+  let lastQuery = null; // Store last searched state/county/city
+
+  function showLoader() {
+document.querySelector('.bar-loader-container').style.display = 'flex';
+  }
+
+  function hideLoader() {
+document.querySelector('.bar-loader-container').style.display = 'none';
+  }
+
+async function search() {
+  const query = document.getElementById('search-input').value.trim();
+  if (!query) return;
+
+  lastQuery = query; 
+  clearCurrentLayer();
+  showLoader();
+
+  const layers = ['state', 'county', 'city'];
+  let geojson = null;
+  let results = null;
+
+  for (const layer of layers) {
+    const url = `http://localhost:8000/geojson/${layer}/${encodeURIComponent(query)}`;
+    try {
+      const response = await fetch(url);
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`Response from ${layer}:`, data); // Debug log
+
+        // Extract the actual GeoJSON object from the nested structure
+        if (data && data.jsonb_build_object && data.jsonb_build_object.features && data.jsonb_build_object.features.length > 0) {
+          results = data.jsonb_build_object; // The actual GeoJSON object is here
+          break;
+        }
+      }
+    } catch (error) {
+      console.error(`Error fetching ${layer}:`, error);
+    }
+  }
+
+  const geojsonResult = results;
+  if (geojsonResult && geojsonResult.features && geojsonResult.features.length > 0) {
+    geojson = geojsonResult;
+    selectedProps = geojson.features[0].properties; 
+    console.log('Selected Properties:', selectedProps);  // Debug log
+  }
+
+  if (!geojson || !geojson.features || geojson.features.length === 0) {
+    alert('Area not found');
+    console.log(geojson);
+    map.setView([39.8283, -98.5795], 4);
+    updateSidebar(null);
+  } else {
+    currentLayer = L.geoJSON(geojson, {
+      style: {
+        color: 'blue',
+        weight: 2,
+        fillOpacity: 0.2
+      }
+    }).addTo(map);
+
+    const bounds = currentLayer.getBounds();
+    console.log('Layer Bounds:', bounds);  // Debug log
+    if (bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [50, 50] });
+    } else {
+      console.warn('Invalid bounds');
+    }
+
+    updateSidebar(selectedProps);
+  }
+
+  hideLoader();
+}
+
+
+
+
+  function clearCurrentLayer() {
+    if (currentLayer) {
+      map.removeLayer(currentLayer);
+      currentLayer = null;
+    }
+    updateSidebar(null);
+  }
+
+  function clearSearch() {
+    document.getElementById('search-input').value = '';
+    lastQuery = null;
+    clearCurrentLayer();
+    const countyDiv = document.getElementById('encompassing-county-details');
+
+        countyDiv.innerHTML = `
+          <h3></h3>
+          <p></p>
+        `;
+
+    map.setView([39.8283, -98.5795], 4);
+  }
+
+  function updateSidebar(props) {
+    const sidebar = document.getElementById('info-sidebar');
+    if (!props) {
+      sidebar.classList.remove('active'); // Slide out
+      sidebar.innerHTML = `<h2>Area Info</h2><p>Search for a location to see details here.</p>`;
+      return;
+    }
+
+    sidebar.innerHTML = `
+      <h2>${props.name || 'N/A'}</h2>
+      <p><strong>Population:</strong> ${props.population ?? 'N/A'}</p>
+      <p><strong>Total Education:</strong> ${props.education_total ?? 'N/A'}</p>
+      <p><strong>Bachelor's Degree:</strong> ${props.bachelor_degree ?? 'N/A'}</p>
+      <p><strong>Master's Degree:</strong> ${props.masters_degree ?? 'N/A'}</p>
+      <p><strong>Population below Poverty Level:</strong> ${props.population_below_poverty_level ?? 'N/A'}</p>
+<div id="encompassing-county-details" style="margin-top: 20px;">
+    <!-- Encompassing county info will appear here -->
+  </div>
+      </div>
+    `;
+
+    sidebar.classList.add('active'); // Slide in
+  }
+
+// Helper function to add a delay
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+async function encompassing_county() {
+  if (!lastQuery) {
+    alert('Please search for a state/city first');
+    return;
+  }
+    showLoader();
+  let layer_type = null;
+  let results;
+  const layers = ['state', 'county', 'city'];
+  for (const layer of layers) {
+    const url = `http://localhost:8000/geojson/${layer}/${encodeURIComponent(lastQuery)}`;
+    try {
+      const response = await fetch(url);
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`Response from ${layer}:`, data); // Debug log
+
+        // Extract the actual GeoJSON object from the nested structure
+        if (data && data.jsonb_build_object && data.jsonb_build_object.features && data.jsonb_build_object.features.length > 0) {
+          results = data.jsonb_build_object;
+          layer_type=layer // The actual GeoJSON object is here
+          break;
+        }
+      }
+    } catch (error) {
+      console.error(`Error fetching ${layer}:`, error);
+    }
+  }
+    const url1 = `http://localhost:8000/geojson/msas/${layer_type}/${encodeURIComponent(lastQuery)}`;
+    try{
+        const response=await fetch(url1);
+        if(response.ok)
+        {
+            const data=await response.json();
+            let county= data.regions;  
+            county = county.filter(c => c.toUpperCase() !== lastQuery.toUpperCase());
+            const countyDiv = document.getElementById('encompassing-county-details');
+      if (county ) {
+        countyDiv.innerHTML = `
+  <h3>Encompassing Counties</h3>
+  <ul style="list-style-type: disc; padding-left: 20px; max-height: 200px; overflow-y: auto;">
+    ${county.map(c => `<li>${c}</li>`).join('')}
+  </ul>
+`;
+      } else {
+        countyDiv.innerHTML = `
+          <h3>Encompassing County</h3>
+          <p>No county found.</p>
+        `;
+      }
+        }
+    }catch (error) {
+      console.error(`Error fetching ${layer_type}:`, error);
+    }
+    hideLoader();
+}
+async function nearby_cities() {
+    showLoader();
+  if (!lastQuery) {
+    alert('Please search for a state/county/city first');
+    return;
+  }
+  let cities = null;
+  try {
+    const url = `http://localhost:8000/geojson/nearby_cities/city/${encodeURIComponent(lastQuery)}`;
+    const response = await fetch(url);
+    if (response.ok) {
+      cities = await response.json();
+      cities=cities.cities;
+      if (cities && cities.length > 0) {
+        const countyDiv = document.getElementById('encompassing-county-details');
+        countyDiv.innerHTML = `
+  <h3>Cities</h3>
+  <ul style="list-style-type: disc; padding-left: 20px; max-height: 200px; overflow-y: auto;">
+    ${cities.map(c => `<li>${c}</li>`).join('')}
+  </ul>
+`;
+        }
+      } else {
+        alert('This operation is valid only for cities');
+      }
+    } catch (error) {
+    console.error('Error fetching nearby cities:', error);
+  }
+  hideLoader();
+}
+
+function show_cities(cityFeature) {
+  // Assuming each city feature has a 'geometry' with 'coordinates' and 'properties' with 'name'
+  const { geometry, properties } = cityFeature;
+
+  if (!geometry || !geometry.coordinates) {
+    console.error('Invalid city feature:', cityFeature);
+    return;
+  }
+
+  const [longitude, latitude] = geometry.coordinates; // Assuming GeoJSON structure for city
+
+  // Create a marker for the city
+  const marker = L.marker([latitude, longitude]).addTo(map);
+
+  // Add a tooltip to the marker that shows the city name
+  marker.bindTooltip(properties.name, {
+    permanent: false,  // Tooltip is shown on hover
+    direction: 'top',
+    offset: L.point(0, -15)
+  }).openTooltip();
+}
+
+
+async function fetchTrend(demographic) {
+  if (!lastQuery) {
+    alert('Please search for a state/county first.');
+    return;
+  }
+
+  try {
+    showLoader();
+
+    const trendData = [];
+    const layers = ['state', 'county', 'city'];
+    let geojson = null;
+    let layer_type = null;
+
+    // First find the correct layer (state, county, city)
+    for (let layer of layers) {
+      const geoUrl = `http://localhost:8000/geojson/${layer}/${encodeURIComponent(lastQuery)}`;
+      try {
+        const geoResponse = await fetch(geoUrl);
+        if (geoResponse.ok) {
+          const geoJsonData = await geoResponse.json();
+          if (geoJsonData.jsonb_build_object.features && geoJsonData.jsonb_build_object.features.length > 0) {
+            geojson = geoJsonData;
+            layer_type = layer;
+            break;
+          }
+        }
+      } catch (error) {
+        console.error(`Error fetching geojson for ${layer}:`, error);
+      }
+    }
+
+    if (!layer_type) {
+      alert('No geographic data found.');
+      return;
+    }
+
+    if (layer_type === 'city') {
+      alert("Trend Data not available for CITY");
+      return;
+    }
+
+    // Now fetch trend data
+    const trendUrl = `http://localhost:8000/demographics/trend/${layer_type}/${encodeURIComponent(lastQuery)}?field=${demographic}`;
+    const trendResponse = await fetch(trendUrl);
+
+    if (!trendResponse.ok) {
+      throw new Error(`Failed to fetch trend data for ${demographic}`);
+    }
+
+    const trendResult = await trendResponse.json();
+    console.log(`Trend data for ${demographic}:`, trendResult);
+
+    if (trendResult && trendResult.trend && trendResult.trend.length > 0) {
+      const fieldData = trendResult.trend.map(item => ({
+        year: item.year,
+        value: item[demographic] !== undefined ? item[demographic] : null
+      }));
+
+      trendData.push({
+        demographic,
+        data: fieldData
+      });
+    console.log(trendData)
+      // Prepare and draw chart
+      const years = trendData[0].data.map(item => item.year);
+      const datasets = trendData.map(({ demographic, data }) => ({
+        label: demographic.replace('_', ' ').toUpperCase(),
+        data: data.map(item => item.value),
+        borderColor: getColorForField(demographic),
+        backgroundColor: getColorForField(demographic, 0.2),
+        fill: true,
+        tension: 0.4
+      }));
+
+      drawChart(years, datasets, demographic);
+      console.log('Chart datasets:', datasets);
+    } else {
+      console.warn(`No trend data available for ${demographic}`);
+      alert('No trend data available.');
+    }
+  } catch (error) {
+    console.error('Error fetching trend:', error);
+    alert('Trend data not available.');
+  } finally {
+    hideLoader();
+  }
+}
+
+
+
+function getColorForField(field, alpha = 1) {
+  const colorMap = {
+    population: 'rgba(75, 192, 192, ' + alpha + ')',
+    education_total: 'rgba(153, 102, 255, ' + alpha + ')',
+    median_household_income: 'rgba(255, 159, 64, ' + alpha + ')'
+  };
+  return colorMap[field] || 'rgba(0, 0, 0, ' + alpha + ')'; // Default color if not found
+}
+let populationChart=null;
+
+function drawChart(labels, data, demographic) {
+  const ctx = document.getElementById('trendChart').getContext('2d');
+  if (populationChart)
+    populationChart.destroy();
+  try {
+    let label = demographic + ' Trend';
+    populationChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: demographic.replace('_', ' ').toUpperCase() + ' Trend',
+          data: data[0].data,
+          backgroundColor: 'rgba(75, 192, 192, 0.2)',
+          borderColor: 'rgba(75, 192, 192, 1)',
+          borderWidth: 2,
+          fill: false,
+          spanGaps: false,  // don't interpolate over missing points
+          pointRadius: 5,   // show dots at each point
+          pointHoverRadius: 7
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            position: 'top',
+          }
+        },
+        elements: {
+          line: {
+            tension: 0, // 👈 key: NO curve smoothing = straight lines
+            borderWidth: 2
+          },
+          point: {
+            radius: 5,
+            hitRadius: 10,
+            hoverRadius: 7
+          }
+        }
+      }
+    });
+  }
+  catch (error) {
+    console.log(error.message);
+  }
+}
+
+
+
+</script>
+
+
+</body>
+</html>
