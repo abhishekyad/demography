@@ -25,10 +25,10 @@ This will trigger the frontend code. Enjoy!
 
 Files to load into db: three files, one for each- county, state and city are loaded. see line 7-9 in database_setup.sh
 Endpoints: the backend is exposed at the following endpoints: 
-          1-http://localhost:8000/geojson/{layer}/{name}      where name is name of place and layer ranges among city, county, state
-          2-http://localhost:8000/demographics/trend/{layer}/{name}?field={field_of_study}  where layer ranges from county to state (trend data is not shown for city), and field of study is query parameter of which you wish to see trend, eg. population
-          3-http://localhost:8000/geojson/msas/{layer}/{name} where layer ranges from city to state 
-          4-http://localhost:8000/geojson/nearby_cities/city/{name}
+          1-http://localhost:8000/geojson/{layer}/{name}      where name is name of place and layer ranges among city, county, state __
+          2-http://localhost:8000/demographics/trend/{layer}/{name}?field={field_of_study}  where layer ranges from county to state (trend data is not shown for city), and field of study is query parameter of which you wish to see trend, eg. population__
+          3-http://localhost:8000/geojson/msas/{layer}/{name} where layer ranges from city to state __
+          4-http://localhost:8000/geojson/nearby_cities/city/{name}__
 
 **Explanation**
 1-  this endpoint fetches the location/boundary of the place you search for. If a county/state is searched, a boundary with an enclosed area is shown, for a city, a point is shown.
