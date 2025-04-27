@@ -16,90 +16,71 @@ psql -U "$USERNAME" -d "$DBNAME" -c "DROP TABLE IF EXISTS demographics;"
 
 psql -U "$USERNAME" -d "$DBNAME" -c "
 CREATE TABLE demographics (
-    place_fips TEXT,
-    full_name TEXT,
-    population DOUBLE PRECISION,
-    median_household_income DOUBLE PRECISION,
-    education_total DOUBLE PRECISION,
-    bachelor_degree DOUBLE PRECISION,
-    masters_degree DOUBLE PRECISION,
-    professional_school_degree DOUBLE PRECISION,
-    doctorate_degree DOUBLE PRECISION,
-    geom GEOMETRY(MultiPolygon, 4326),
-    layer_type TEXT,
-    region VARCHAR,
-    division VARCHAR,
-    statefp VARCHAR,
-    statens VARCHAR,
-    geoid VARCHAR,
-    geoidfq VARCHAR,
-    stusps VARCHAR,
-    name VARCHAR,
-    year DOUBLE PRECISION,
-    lsad VARCHAR,
-    mtfcc VARCHAR,
-    funcstat VARCHAR,
-    aland BIGINT,
-    awater BIGINT,
-    intptlat VARCHAR,
-    intptlon VARCHAR,
-    state_fips VARCHAR,
-    name2 VARCHAR,
-    means_of_transportation_to_work DOUBLE PRECISION,
-    population_below_poverty_level DOUBLE PRECISION,
-    countyfp VARCHAR,
-    countyns VARCHAR,
-    namelsad VARCHAR,
-    classfp VARCHAR,
-    csafp VARCHAR,
-    cbsafp VARCHAR,
-    metdivfp VARCHAR,
-    county_fips VARCHAR,
-    placefp VARCHAR,
-    placens VARCHAR,
-    pcicbsa VARCHAR
+    state VARCHAR PRIMARY KEY,
+    county JSONB DEFAULT '[]'::JSONB,
+    city JSONB DEFAULT '[]'::JSONB
 );
 "
 
-# 3. Load the states GeoJSON data into the demographics table
-ogr2ogr -f "PostgreSQL" PG:"dbname=$DBNAME user=$USERNAME" "$GEOJSON_FILE3" -nln demographics -nlt MULTIPOLYGON -lco GEOMETRY_NAME=geom -lco FID=gid
-
-# Update the layer_type to 'state'
+# 3. Load states into the demographics table
+# Insert each state with empty county and city arrays
 psql -U "$USERNAME" -d "$DBNAME" -c "
-UPDATE demographics
-SET layer_type = 'state';
+WITH states_data AS (
+    SELECT DISTINCT properties->>'STATEFP' AS statefp
+    FROM (
+        SELECT jsonb_array_elements((ST_AsGeoJSON(geom)::jsonb)->'features') AS feature
+        FROM ogr_fdw_layer
+        WHERE filename = '$GEOJSON_FILE3'
+    ) AS features
+    CROSS JOIN LATERAL (SELECT feature->'properties' AS properties) AS props
+)
+INSERT INTO demographics (state)
+SELECT statefp
+FROM states_data;
 "
 
-# 4. Load counties (append)
-ogr2ogr -f "PostgreSQL" PG:"dbname=$DBNAME user=$USERNAME" "$GEOJSON_FILE1" -nln demographics -nlt MULTIPOLYGON -lco GEOMETRY_NAME=geom -lco FID=gid -append
-
-# Update layer_type to 'county'
+# 4. Insert counties under each state
 psql -U "$USERNAME" -d "$DBNAME" -c "
-UPDATE demographics
-SET layer_type = 'county'
-WHERE layer_type IS NULL;
+WITH counties_data AS (
+    SELECT 
+        properties->>'STATEFP' AS statefp,
+        jsonb_build_object(
+            'PLACEFP', properties->>'PLACEFP',
+            'STATEFP', properties->>'STATEFP'
+        ) AS county_info
+    FROM (
+        SELECT jsonb_array_elements((ST_AsGeoJSON(geom)::jsonb)->'features') AS feature
+        FROM ogr_fdw_layer
+        WHERE filename = '$GEOJSON_FILE1'
+    ) AS features
+    CROSS JOIN LATERAL (SELECT feature->'properties' AS properties) AS props
+)
+UPDATE demographics d
+SET county = county || county_info
+FROM counties_data c
+WHERE d.state = c.statefp;
 "
 
-# 5. Load cities (append)
-ogr2ogr -f "PostgreSQL" PG:"dbname=$DBNAME user=$USERNAME" "$GEOJSON_FILE2" -nln demographics -nlt MULTIPOLYGON -lco GEOMETRY_NAME=geom -lco FID=gid -append
-
-# Update layer_type to 'city'
+# 5. Insert cities under each state
 psql -U "$USERNAME" -d "$DBNAME" -c "
-UPDATE demographics
-SET layer_type = 'city'
-WHERE layer_type IS NULL;
+WITH cities_data AS (
+    SELECT 
+        properties->>'STATEFP' AS statefp,
+        jsonb_build_object(
+            'PLACEFP', properties->>'PLACEFP',
+            'STATEFP', properties->>'STATEFP'
+        ) AS city_info
+    FROM (
+        SELECT jsonb_array_elements((ST_AsGeoJSON(geom)::jsonb)->'features') AS feature
+        FROM ogr_fdw_layer
+        WHERE filename = '$GEOJSON_FILE2'
+    ) AS features
+    CROSS JOIN LATERAL (SELECT feature->'properties' AS properties) AS props
+)
+UPDATE demographics d
+SET city = city || city_info
+FROM cities_data c
+WHERE d.state = c.statefp;
 "
 
-# Clear 'year' for cities
-psql -U "$USERNAME" -d "$DBNAME" -c "
-UPDATE demographics
-SET year = NULL
-WHERE layer_type = 'city';
-"
-
-# 7. Create a spatial index
-psql -U "$USERNAME" -d "$DBNAME" -c "
-CREATE INDEX IF NOT EXISTS idx_demographics_geom ON demographics USING GIST (geom);
-"
-
-echo "✅ Done loading and updating the GeoJSON into the database with layer_type!"
+echo "✅ Done setting up the demographics table with states, counties, and cities!"
