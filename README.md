@@ -31,12 +31,20 @@ Endpoints: the backend is exposed at the following endpoints:
           4-http://localhost:8000/geojson/nearby_cities/city/{name} <br />
 
 **Explanation**
-1-  this endpoint fetches the location/boundary of the place you search for. If a county/state is searched, a boundary with an enclosed area is shown, for a city, a point is shown.
+1-  this endpoint fetches the location/boundary of the place you search for. If a county/state is searched, a boundary with an enclosed area is shown, for a city, a point is shown.<br />
 
-2-  this endpoint provides the trend of queried demographic across time. A trend for the last 9 years is given.
+<img width="1083" alt="Screenshot 2025-04-27 at 10 37 32 AM" src="https://github.com/user-attachments/assets/d958170f-1415-44a1-ae06-258817303a6f" />
 
-3-  this endpoint shows the counties encompassing a state. If a city is queried, the county for that city is returned
 
-4-  this endpoint shows upto 30 cities within a radius of 50km from the queried city. This endpoint is functional only for cities.
+2-  this endpoint provides the trend of queried demographic across time. A trend for the last 9 years is given. <br />
+<img width="327" alt="Screenshot 2025-04-27 at 10 37 12 AM" src="https://github.com/user-attachments/assets/1a7fc1ba-72b3-45d1-9218-21c43b3cab99" />
 
+
+3-  this endpoint shows the counties encompassing a state. If a city is queried, the county for that city is returned <br />
+<img width="1421" alt="Screenshot 2025-04-27 at 10 45 38 AM" src="https://github.com/user-attachments/assets/af687ee3-e116-4bdd-b08f-44e6d8260223" />
+
+
+
+4-  this endpoint shows upto 30 cities within a radius of 50km from the queried city or 200km outside the state if the query is a state. <br />
+<img width="1415" alt="Screenshot 2025-04-27 at 10 36 44 AM" src="https://github.com/user-attachments/assets/6ac2cc1e-53cc-4ae3-9f35-04ec7b3edc40" />
 
