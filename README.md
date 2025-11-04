@@ -1,3 +1,4 @@
+This project presents demographic trends of North American states, cities and counties on an interactive interface.
 # demography
 run the following installation commands.
 
